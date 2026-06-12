@@ -16,6 +16,40 @@ REGION_CODES = {
 }
 
 
+def is_leap_year(year: int) -> bool:
+    if year % 400 == 0:
+        return True
+    if year % 100 == 0:
+        return False
+    if year % 4 == 0:
+        return True
+    return False
+
+
+def validate_birth_date(year: int, month: int, day: int) -> tuple[bool, str]:
+    if year < 1900 or year > 9999:
+        return False, f'年份 {year} 超出有效范围'
+    if month < 1 or month > 12:
+        return False, f'月份 {month} 无效'
+    if day < 1:
+        return False, f'日期 {day} 不能小于1'
+
+    days_in_month = {
+        1: 31, 2: 29 if is_leap_year(year) else 28,
+        3: 31, 4: 30, 5: 31, 6: 30,
+        7: 31, 8: 31, 9: 30, 10: 31,
+        11: 30, 12: 31,
+    }
+
+    max_day = days_in_month[month]
+    if day > max_day:
+        if month == 2 and day == 29:
+            return False, f'{year}年不是闰年，2月没有29日'
+        return False, f'{month}月最多有{max_day}天'
+
+    return True, '出生日期有效'
+
+
 def validate_id_card(id_card: str) -> bool:
     return validate_id_card_with_reason(id_card)[0]
 
@@ -29,12 +63,23 @@ def validate_id_card_with_reason(id_card: str) -> tuple[bool, str]:
     region_code = id_card[:2]
     if region_code not in REGION_CODES:
         return False, f'地区代码 {region_code} 无效'
+
+    birth_str = id_card[6:14]
     try:
-        birth_date = datetime.strptime(id_card[6:14], '%Y%m%d').date()
+        year = int(birth_str[:4])
+        month = int(birth_str[4:6])
+        day = int(birth_str[6:8])
     except ValueError:
-        return False, f'出生日期 {id_card[6:14]} 无效'
+        return False, f'出生日期 {birth_str} 无法解析'
+
+    date_valid, date_reason = validate_birth_date(year, month, day)
+    if not date_valid:
+        return False, f'出生日期 {birth_str} 无效: {date_reason}'
+
+    birth_date = date(year, month, day)
     if birth_date > date.today():
         return False, f'出生日期 {birth_date} 不能晚于今天'
+
     check_sum = sum(int(id_card[i]) * WEIGHTS[i] for i in range(17))
     expected_check_code = CHECK_CODES[check_sum % 11]
     if id_card[17] != expected_check_code:
@@ -43,30 +88,44 @@ def validate_id_card_with_reason(id_card: str) -> tuple[bool, str]:
 
 
 def extract_birth_date(id_card: str) -> date:
-    if not validate_id_card(id_card):
-        raise ValueError('Invalid ID card number')
-    return datetime.strptime(id_card[6:14], '%Y%m%d').date()
+    valid, reason = validate_id_card_with_reason(id_card)
+    if not valid:
+        raise ValueError(f'Invalid ID card number: {reason}')
+    birth_str = id_card[6:14]
+    year = int(birth_str[:4])
+    month = int(birth_str[4:6])
+    day = int(birth_str[6:8])
+    return date(year, month, day)
 
 
 def extract_gender(id_card: str) -> str:
-    if not validate_id_card(id_card):
-        raise ValueError('Invalid ID card number')
+    valid, reason = validate_id_card_with_reason(id_card)
+    if not valid:
+        raise ValueError(f'Invalid ID card number: {reason}')
     gender_code = int(id_card[16])
     return '男' if gender_code % 2 == 1 else '女'
 
 
-def calculate_age(id_card: str) -> int:
+def calculate_age(id_card: str, today: date = None) -> int:
     birth_date = extract_birth_date(id_card)
-    today = date.today()
+    if today is None:
+        today = date.today()
+
     age = today.year - birth_date.year
-    if (today.month, today.day) < (birth_date.month, birth_date.day):
+
+    birth_month = birth_date.month
+    birth_day = birth_date.day
+
+    if (today.month, today.day) < (birth_month, birth_day):
         age -= 1
+
     return age
 
 
 def extract_region(id_card: str) -> str:
-    if not validate_id_card(id_card):
-        raise ValueError('Invalid ID card number')
+    valid, reason = validate_id_card_with_reason(id_card)
+    if not valid:
+        raise ValueError(f'Invalid ID card number: {reason}')
     region_code = id_card[:2]
     return REGION_CODES.get(region_code, '未知地区')
 
@@ -107,13 +166,18 @@ def generate_test_id_card(
     if birth_month is None:
         birth_month = random.randint(1, 12)
     if birth_day is None:
-        birth_day = random.randint(1, 28)
+        max_day = 29 if (birth_month == 2 and is_leap_year(birth_year)) else (
+            28 if birth_month == 2 else (
+                30 if birth_month in (4, 6, 9, 11) else 31
+            )
+        )
+        birth_day = random.randint(1, max_day)
 
-    try:
-        birth_date = date(birth_year, birth_month, birth_day)
-    except ValueError as e:
-        raise ValueError(f'无效的出生日期: {e}')
+    date_valid, date_reason = validate_birth_date(birth_year, birth_month, birth_day)
+    if not date_valid:
+        raise ValueError(f'无效的出生日期: {date_reason}')
 
+    birth_date = date(birth_year, birth_month, birth_day)
     if birth_date > date.today():
         raise ValueError('出生日期不能晚于今天')
 
