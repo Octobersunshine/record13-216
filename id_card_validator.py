@@ -107,19 +107,122 @@ def extract_gender(id_card: str) -> str:
 
 
 def calculate_age(id_card: str, today: date = None) -> int:
+    return calculate_age_detail(id_card, today=today)['years']
+
+
+def calculate_age_detail(id_card: str, today: date = None) -> dict:
     birth_date = extract_birth_date(id_card)
     if today is None:
         today = date.today()
 
-    age = today.year - birth_date.year
+    if today < birth_date:
+        return {
+            'years': 0,
+            'months': 0,
+            'days': 0,
+            'total_months': 0,
+            'total_days': 0,
+            'summary': '未出生',
+        }
+
+    birth_year = birth_date.year
+    birth_month = birth_date.month
+    birth_day = birth_date.day
+
+    def get_effective_birthday(target_year: int) -> date:
+        if birth_month == 2 and birth_day == 29 and not is_leap_year(target_year):
+            return date(target_year, 3, 1)
+        return date(target_year, birth_month, birth_day)
+
+    def days_in_month(year: int, month: int) -> int:
+        if month == 2:
+            return 29 if is_leap_year(year) else 28
+        elif month in (4, 6, 9, 11):
+            return 30
+        else:
+            return 31
+
+    years = today.year - birth_year
+    this_year_birthday = get_effective_birthday(today.year)
+
+    if today < this_year_birthday:
+        years -= 1
+
+    if years < 0:
+        years = 0
+
+    last_anniversary = get_effective_birthday(birth_year + years)
+    next_full_anniversary = get_effective_birthday(birth_year + years + 1)
+
+    effective_today = today
+    if effective_today >= next_full_anniversary:
+        effective_today = date.fromordinal(next_full_anniversary.toordinal() - 1)
+
+    anniv_day = last_anniversary.day
+
+    month_diff = (effective_today.year - last_anniversary.year) * 12 + (effective_today.month - last_anniversary.month)
+
+    today_month_max = days_in_month(effective_today.year, effective_today.month)
+    month_anniv_day = min(anniv_day, today_month_max)
+
+    if effective_today.day >= month_anniv_day:
+        months = month_diff
+        days = effective_today.day - month_anniv_day
+    else:
+        months = month_diff - 1
+        prev_month_year = effective_today.year
+        prev_month = effective_today.month - 1
+        if prev_month < 1:
+            prev_month = 12
+            prev_month_year -= 1
+        days_in_prev = days_in_month(prev_month_year, prev_month)
+        prev_anniv_day = min(anniv_day, days_in_prev)
+        days = days_in_prev - prev_anniv_day + effective_today.day
+
+    if months < 0:
+        months = 0
+
+    total_months = years * 12 + months
+    total_days = (today - birth_date).days
+
+    return {
+        'years': years,
+        'months': months,
+        'days': days,
+        'total_months': total_months,
+        'total_days': total_days,
+        'summary': f'{years}岁{months}个月零{days}天',
+    }
+
+
+def days_until_birthday(id_card: str, today: date = None) -> int:
+    birth_date = extract_birth_date(id_card)
+    if today is None:
+        today = date.today()
 
     birth_month = birth_date.month
     birth_day = birth_date.day
 
-    if (today.month, today.day) < (birth_month, birth_day):
-        age -= 1
+    def get_effective_birthday(target_year: int) -> date:
+        if birth_month == 2 and birth_day == 29 and not is_leap_year(target_year):
+            return date(target_year, 3, 1)
+        return date(target_year, birth_month, birth_day)
 
-    return age
+    this_year_birthday = get_effective_birthday(today.year)
+
+    if this_year_birthday > today:
+        next_birthday = this_year_birthday
+    else:
+        next_birthday = get_effective_birthday(today.year + 1)
+
+    return (next_birthday - today).days
+
+
+def total_days_alive(id_card: str, today: date = None) -> int:
+    birth_date = extract_birth_date(id_card)
+    if today is None:
+        today = date.today()
+    return (today - birth_date).days
 
 
 def extract_region(id_card: str) -> str:
@@ -130,18 +233,29 @@ def extract_region(id_card: str) -> str:
     return REGION_CODES.get(region_code, '未知地区')
 
 
-def get_id_card_info(id_card: str) -> dict:
-    if not validate_id_card(id_card):
-        valid, reason = validate_id_card_with_reason(id_card)
+def get_id_card_info(id_card: str, detail: bool = True) -> dict:
+    valid, reason = validate_id_card_with_reason(id_card)
+    if not valid:
         raise ValueError(f'Invalid ID card number: {reason}')
-    return {
+
+    age_detail = calculate_age_detail(id_card)
+
+    result = {
         'id_card': id_card.upper(),
         'valid': True,
         'birth_date': extract_birth_date(id_card).strftime('%Y-%m-%d'),
         'gender': extract_gender(id_card),
-        'age': calculate_age(id_card),
+        'age': age_detail['years'],
+        'age_verbose': age_detail['summary'],
         'region': extract_region(id_card),
     }
+
+    if detail:
+        result['age_detail'] = age_detail
+        result['days_until_birthday'] = days_until_birthday(id_card)
+        result['total_days_alive'] = total_days_alive(id_card)
+
+    return result
 
 
 def calculate_check_code(id_card_17: str) -> str:
